@@ -16,6 +16,7 @@ class EklaseSession:
         self.session = requests.Session()
         self.base_url = "https://my.e-klase.lv"
         self.api_url = f"{self.base_url}/api/family"
+        self.mail_idx = 0
         # request is blocked without User-Agent
         self.session.headers.update({'User-Agent': DEFAULT_USER_AGENT})
 
@@ -57,9 +58,7 @@ class EklaseSession:
 
     # get all message id's based on type (inbox, unread, follow, deleted, drafts, sent)
     def _fetch_message_ids(self, mail_type: str = "inbox") -> list[int]:
-        if self._check_mail_type(mail_type) is False:
-            print(f"Error: {mail_type} is not a valid type")
-            return
+        self._check_mail_type(mail_type)
 
         mail_api_url = f"{self.api_url}/mail"
         message_ids_url = f"/folder-message-ids/standardType_fmft_{mail_type.lower()}"
@@ -72,10 +71,14 @@ class EklaseSession:
         if not ids:
             return []
 
+        max_idx = min(amount + self.mail_idx, len(ids))
+
         messages_api_url = f"{self.api_url}/mail/messages"
         # assume 0 as a starting idx in the list
-        response = self.session.post(messages_api_url, json=ids[:amount])
+        response = self.session.post(messages_api_url, json=ids[self.mail_idx:max_idx])
         response.raise_for_status()
+
+        self.mail_idx = max_idx
         return response.json()
 
     # get list of dict with message data
