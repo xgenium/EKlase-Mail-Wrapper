@@ -16,7 +16,8 @@ class EklaseSession:
         self.session = requests.Session()
         self.base_url = "https://my.e-klase.lv"
         self.api_url = f"{self.base_url}/api/family"
-        self.mail_idx = 0
+        self._mail_idx = 0
+        self._prev_mail_type = ""
         # request is blocked without User-Agent
         self.session.headers.update({'User-Agent': DEFAULT_USER_AGENT})
 
@@ -71,23 +72,51 @@ class EklaseSession:
         if not ids:
             return []
 
-        max_idx = min(amount + self.mail_idx, len(ids))
+        max_idx = min(amount + self._mail_idx, len(ids))
 
         messages_api_url = f"{self.api_url}/mail/messages"
         # assume 0 as a starting idx in the list
-        response = self.session.post(messages_api_url, json=ids[self.mail_idx:max_idx])
+        response = self.session.post(messages_api_url, json=ids[self._mail_idx:max_idx])
         response.raise_for_status()
-
-        self.mail_idx = max_idx
         return response.json()
 
     # get list of dict with message data
     def get_mail(self, mail_type: str = "inbox", amount=10) -> list:
-        message_ids = self._fetch_message_ids(mail_type)
-        return self._fetch_messages(message_ids, amount)
+        self._message_ids = self._fetch_message_ids(mail_type)
+        if self._prev_mail_type != mail_type:
+            self._mail_idx = 0
+            self._prev_mail_type = mail_type
 
-    def get_message(self, message_id: int) -> dict:
-        messages = self._fetch_messages([message_id])
-        if not messages:
-            raise LookupError(f"Message with ID {message_id} not found")
-        return messages[0]
+        return self._fetch_messages(self._message_ids, amount)
+
+    def extend_mail(self, amount=10):
+        self._mail_idx = min(amount + self._mail_idx, len(self._message_ids))
+        return self._fetch_messages(self._message_ids, amount)
+
+    def read_message(self, message_id):
+        unread_api_url = f"{self.api_url}/mail/message/read"
+        response = self.session.post(unread_api_url, json={"messageId": message_id})
+        response.raise_for_status()
+
+    def _compose_message(self, recipients_ids: list[int], subject: str = ".", body: str = ".") -> dir:
+        recipients = [{'id': rec_id} for rec_id in recipients_ids]
+        return {
+            "body": body,
+            "draftType": "mdt_new",
+            "recipients": recipients,
+            "subject": subject
+        }
+
+    # def save_draft_message(self, recipients: list[dir], subject: str = ".", body: str = "."):
+    #     save_draft_url = f"{self.api_url}/mail/save-draft"
+    #     message
+
+    # TODO: Add recipients selection
+
+    def send_message(self, recipients_ids: list[int], subject: str = ".", body: str = "."):
+        send_api_url = f"{self.api_url}/mail/send"
+        recipients: list[int] = []
+        message = {"message": self._compose_message(recipients_ids, subject, body)}
+        response = self.session.post(send_api_url, json=message)
+        response.raise_for_status()
+        return response.json() # messageId
