@@ -1,13 +1,10 @@
 import requests
-from bs4 import BeautifulSoup
+import re
 
 VALID_MAIL_TYPES = {"inbox", "unread", "follow", "deleted", "drafts", "sent"}
 DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0'
 
 class EklaseAuthError(Exception):
-    pass
-
-class EklaseApiError(Exception):
     pass
 
 class EklaseSession:
@@ -36,21 +33,23 @@ class EklaseSession:
 
         # handle profile selection
         if "CheckForProfileSelection" in response.url:
-            soup = BeautifulSoup(response.text, "html.parser")
-            form = soup.find("form")
-            if form is None:
+            action_match = re.search(r'action=["\']([^"\']+)["\']', response.text)
+            if not action_match:
                 raise EklaseAuthError("Profile selection form not found")
 
-            action_url = form["action"]
+            action_url = action_match.group(1)
+            form_data = self._get_form_data(response.text)
 
-            # grab all hidden inputs required for next redirect (TenantId, pf_id)
-            form_data = {i["name"]: i.get("value", "")
-                         for i in form.find_all("input") if i.has_attr("name")}
             response = self.session.post(f"{self.base_url}{action_url}", data=form_data)
             response.raise_for_status()
 
         if "Home?login=1" not in response.url:
             raise EklaseAuthError("Login failed")
+
+    def _get_form_data(self, html_text):
+        pattern = r'<input\s+[^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']'
+        inputs = re.findall(pattern, html_text)
+        return {name: value for name, value in inputs}
 
     def _check_mail_type(self, mail_type: str):
         if mail_type.lower() not in VALID_MAIL_TYPES:
